@@ -13,9 +13,11 @@ class VAIRL(Discriminator):
         
         self.g = VariationalG(state_dim, action_dim, self.args.hidden_dim, self.args.z_dim, self.args.state_only)
         self.h = VariationalH(state_dim, action_dim, self.args.hidden_dim, self.args.z_dim)
+        
         self.network_init()
-        self.criterion = nn.BCELoss()
+        
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.args.lr)
+        self.criterion = nn.BCELoss()
         
     def get_joint_latent_kl_div(self, mu, logvar):
         raise NotImplementedError
@@ -36,28 +38,44 @@ class VAIRL(Discriminator):
         else:
             exp_f = torch.exp(self.get_f(state, action, next_state, done_mask, get_dist))
             return (exp_f/(exp_f + prob))
+    
     def get_reward(self,prob,state,action,next_state,done,get_dist = False):
         done_mask = 1 - done.float()
         d = self.get_d(prob, state, action, next_state, done_mask, get_dist)
         return -torch.log(d).detach()
+    
     def forward(self, prob, state, action, next_state, done_mask, get_dist = False):
         d = (self.get_d(prob, state, action, next_state, done_mask, get_dist))
         return d
         
     def train_network(self, writer, n_epi, agent_s, agent_a, agent_next_s, agent_prob, agent_done_mask, expert_s, expert_a, expert_next_s, expert_prob, expert_done_mask):
         for i in range(self.args.epoch):
-            expert_preds,expert_mu,expert_std = self.forward(expert_prob,expert_s,expert_a,expert_next_s,expert_done_mask,get_dist = True)
-            expert_loss = self.criterion(expert_preds,torch.zeros(expert_preds.shape[0],1).to(self.device)) 
+            expert_logits, expert_mu,expert_std = self.forward(expert_prob,expert_s,expert_a,expert_next_s,expert_done_mask,get_dist = True)
+            
+            expert_preds = torch.sigmoid(expert_logits)
 
-            agent_preds,agent_mu,agent_std = self.forward(agent_prob,agent_s,agent_a,agent_next_s,agent_done_mask,get_dist = True)
+            # print("Expert Pred:", expert_preds)
+            # print("Expert Zero:", torch.zeros(expert_preds.shape[0],1))
+            
+            expert_loss = self.criterion(expert_preds, torch.zeros(expert_preds.shape[0],1).to(self.device))
+            
+            agent_logits,agent_mu,agent_std = self.forward(agent_prob,agent_s,agent_a,agent_next_s,agent_done_mask,get_dist = True)
+            agent_preds = torch.sigmoid(agent_logits)
+
+            # print("Expert Pred:", agent_preds)
+            # print("Expert Zero:", torch.zeros(agent_preds.shape[0],1))
+            
             agent_loss = self.criterion(agent_preds,torch.ones(agent_preds.shape[0],1).to(self.device))
             
-            expert_bottleneck_loss = self.get_joint_latent_kl_div(expert_mu,expert_std)
-            agent_bottleneck_loss = self.get_joint_latent_kl_div(agent_mu,agent_std)
+            expert_bottleneck_loss = self.get_joint_latent_kl_div(expert_mu, expert_std)
+            agent_bottleneck_loss  = self.get_joint_latent_kl_div(agent_mu, agent_std)
+            
             bottleneck_loss = 0.5 * (expert_bottleneck_loss + agent_bottleneck_loss)
             bottleneck_loss = bottleneck_loss -  self.args.mutual_info_constraint
+            
             self.beta = max(0,self.beta + self.args.dual_stepsize * bottleneck_loss.detach())
             loss = expert_loss + agent_loss + (bottleneck_loss) * self.beta
+            
             expert_acc = ((expert_preds < 0.5).float()).mean()
             learner_acc = ((agent_preds > 0.5).float()).mean()
             #print("expert_acc : ",expert_acc)

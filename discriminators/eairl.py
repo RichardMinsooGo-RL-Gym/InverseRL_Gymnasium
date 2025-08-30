@@ -4,13 +4,13 @@ from networks.discriminator_network import Q_phi, Empowerment, Reward
 import torch
 import torch.nn as nn
 
-    
 class EAIRL(Discriminator):
-    def __init__(self,writer, device, state_dim, action_dim, args):
+    def __init__(self, writer, device, state_dim, action_dim, args):
         super(EAIRL, self).__init__()
         self.writer = writer
         self.device = device
         self.args = args
+        
         self.q_phi = Q_phi(self.args.layer_num, state_dim, action_dim, self.args.hidden_dim, self.args.activation_function,self.args.last_activation,self.args.trainable_std)
         self.empowerment = Empowerment(self.args.layer_num, state_dim, action_dim, self.args.hidden_dim, self.args.activation_function ,self.args.last_activation)
         self.empowerment_t = Empowerment(self.args.layer_num, state_dim, action_dim, self.args.hidden_dim, self.args.activation_function ,self.args.last_activation)

@@ -9,6 +9,7 @@ class GAIL(Discriminator):
         self.writer = writer
         self.device = device
         self.args = args
+        
         self.network = Network(args.layer_num, state_dim+action_dim, 1, args.hidden_dim, args.activation_function,args.last_activation)
         self.criterion = nn.BCELoss()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=args.lr)
@@ -17,6 +18,10 @@ class GAIL(Discriminator):
         prob = self.network.forward(x)
         return prob
     def get_reward(self,state,action):
+        action = action.reshape(1,-1)
+        # print("State  S:", state.shape)
+        # print("Action S:", action.shape)
+        
         x = torch.cat((state,action),-1)
         x = self.network.forward(x)
         return -torch.log(x).detach()

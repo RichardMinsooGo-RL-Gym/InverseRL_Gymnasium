@@ -28,6 +28,10 @@ class VAIL(Discriminator):
             return x,mu,std
         
     def get_reward(self,state,action):
+        action = action.reshape(1,-1)
+        # print("State  S:", state.shape)
+        # print("Action S:", action.shape)
+        
         x = torch.cat((state,action),-1)
         mu = self.vdb.get_mean(x)
         x = torch.sigmoid(self.fc3(torch.relu(mu)))
@@ -54,8 +58,7 @@ class VAIL(Discriminator):
             
             self.beta = max(0,self.beta + self.args.dual_stepsize * bottleneck_loss.detach())
             loss = expert_loss + agent_loss + (bottleneck_loss) * self.beta
-
-
+            
             expert_acc = ((expert_preds < 0.5).float()).mean()
             learner_acc = ((agent_preds > 0.5).float()).mean()
             if self.writer != None:
