@@ -7,21 +7,22 @@ from discriminators.vail     import VAIL
 from discriminators.airl     import AIRL
 from discriminators.vairl    import VAIRL
 from discriminators.eairl    import EAIRL
-from discriminators.sqil    import SQIL
+from discriminators.sqil     import SQIL
 from utils.utils             import RunningMeanStd, Dict, make_transition
 
 from configparser            import ConfigParser
 from argparse                import ArgumentParser
 
 import os
-import gym
+import gymnasium as gym
 import numpy as np
 
 import torch
 
 os.makedirs('./model_weights', exist_ok=True)
 
-env = gym.make("Hopper-v2")
+env = gym.make('Hopper-v5', ctrl_cost_weight=1e-3)
+# env = gym.make('HalfCheetah-v4')
 
 action_dim = env.action_space.shape[0]
 state_dim = env.observation_space.shape[0]
@@ -29,14 +30,14 @@ state_dim = env.observation_space.shape[0]
 parser = ArgumentParser('parameters')
 
 
-parser.add_argument('--test', type=bool, default=False, help="True if test, False if train (default: False)")
-parser.add_argument('--render', type=bool, default=False, help="(default: False)")
-parser.add_argument('--epochs', type=int, default=1001, help='number of epochs, (default: 1001)')
-parser.add_argument("--agent", type=str, default = 'ppo', help = 'actor training algorithm(default: ppo)')
-parser.add_argument("--discriminator", type=str, default = 'gail', help = 'discriminator training algorithm(default: gail)')
-parser.add_argument("--save_interval", type=int, default = 100, help = 'save interval')
-parser.add_argument("--print_interval", type=int, default = 1, help = 'print interval')
-parser.add_argument('--tensorboard', type=bool, default=True, help='use_tensorboard, (default: True)')
+parser.add_argument('--test',           type=bool, default=False,   help="True if test, False if train (default: False)")
+parser.add_argument('--render',         type=bool, default=False,   help="(default: False)")
+parser.add_argument('--epochs',         type=int,  default=1000,     help='number of epochs, (default: 1001)')
+parser.add_argument("--agent",          type=str,  default = 'ppo',  help = 'actor training algorithm(default: ppo)')
+parser.add_argument("--discriminator",  type=str,  default = 'gail', help = 'discriminator training algorithm(default: gail)')
+parser.add_argument("--save_interval",  type=int,  default = 100,    help = 'save interval')
+parser.add_argument("--print_interval", type=int,  default = 1,      help = 'print interval')
+parser.add_argument('--tensorboard',    type=bool, default=True,    help='use_tensorboard, (default: True)')
 
 args = parser.parse_args()
 parser = ConfigParser()
@@ -74,7 +75,9 @@ elif args.agent == 'sac':
     algorithm = SAC(device, state_dim, action_dim, agent_args)
 else:
     raise NotImplementedError
+
 agent = Agent(algorithm, writer, device, state_dim, action_dim, agent_args, demonstrations_location_args)
+
 if device == 'cuda':
     agent = agent.cuda()
     discriminator = discriminator.cuda()
@@ -85,10 +88,12 @@ score_lst = []
 discriminator_score_lst = []
 score = 0.0
 discriminator_score = 0
+
 if agent_args.on_policy == True:
     state_lst = []
-    state_ = (env.reset())
+    state_, _ = (env.reset())
     state = np.clip((state_ - state_rms.mean) / (state_rms.var ** 0.5 + 1e-8), -5, 5)
+    
     for n_epi in range(args.epochs):
         for t in range(agent_args.traj_length):
             if args.render:    
@@ -96,8 +101,10 @@ if agent_args.on_policy == True:
             state_lst.append(state_)
             
             action, log_prob = agent.get_action(torch.from_numpy(state).float().unsqueeze(0).to(device))
+            action = action.reshape(-1,)
+            # print("Act Shape :", action.shape)
             
-            next_state_, r, done, info = env.step(action.cpu().numpy())
+            next_state_, r, done, _, _ = env.step(action.cpu().numpy())
             next_state = np.clip((next_state_ - state_rms.mean) / (state_rms.var ** 0.5 + 1e-8), -5, 5)
             if discriminator_args.is_airl:
                 reward = discriminator.get_reward(\
@@ -116,11 +123,12 @@ if agent_args.on_policy == True:
                                          np.array([done]),\
                                          log_prob.detach().cpu().numpy()\
                                         )
-            agent.put_data(transition) 
+            
+            agent.put_data(transition)
             score += r
             discriminator_score += reward
             if done:
-                state_ = (env.reset())
+                state_, _ = (env.reset())
                 state = np.clip((state_ - state_rms.mean) / (state_rms.var ** 0.5 + 1e-8), -5, 5)
                 score_lst.append(score)
                 if writer != None:
@@ -134,7 +142,7 @@ if agent_args.on_policy == True:
         agent.train(discriminator, discriminator_args.batch_size, state_rms, n_epi)
         state_rms.update(np.vstack(state_lst))
         state_lst = []
-        if n_epi%args.print_interval==0 and n_epi!=0:
+        if n_epi%args.print_interval==0 and n_epi!=0 and len(score_lst)!=0:
             print("# of episode :{}, avg score : {:.1f}".format(n_epi, sum(score_lst)/len(score_lst)))
             score_lst = []
         if (n_epi % args.save_interval == 0 )& (n_epi != 0):
@@ -143,14 +151,16 @@ else : #off-policy
     for n_epi in range(args.epochs):
         score = 0.0
         discriminator_score = 0.0
-        state = env.reset()
+        state, _ = (env.reset())
         done = False
         while not done:
             if args.render:    
                 env.render()
             action_, log_prob = agent.get_action(torch.from_numpy(state).float().to(device))
+            action_ = action_.reshape(-1,)
+            
             action = action_.cpu().detach().numpy()
-            next_state, r, done, info = env.step(action)
+            next_state, r, done, _, _ = env.step(action)
             if discriminator_args.is_airl:
                 reward = discriminator.get_reward(\
                             log_prob,
