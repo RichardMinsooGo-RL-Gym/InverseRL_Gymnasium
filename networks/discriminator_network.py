@@ -128,5 +128,9 @@ class Reward(Network):
         output : scalar
         '''
     def forward(self,state,action):
+        action = action.reshape(1,-1)
+        # print("State  S:", state.shape)
+        # print("Action S:", action.shape)
+        
         x = torch.cat((state,action),-1)
         return self._forward(x)
